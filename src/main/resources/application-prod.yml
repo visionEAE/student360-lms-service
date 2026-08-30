@@ -1,0 +1,7 @@
+# Production deltas only: validate Google ID tokens whose audience is this service's own URL.
+student360:
+  security:
+    service-token:
+      mode: google
+      secret: ""
+      expected-audience: ${SERVICE_AUDIENCE}
