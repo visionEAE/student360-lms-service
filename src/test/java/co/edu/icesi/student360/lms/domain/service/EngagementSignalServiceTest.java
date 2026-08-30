@@ -1,13 +1,17 @@
 package co.edu.icesi.student360.lms.domain.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import co.edu.icesi.student360.lms.domain.model.AccessLog;
+import co.edu.icesi.student360.lms.domain.model.ActivitySummary;
 import co.edu.icesi.student360.lms.domain.model.Assignment;
 import co.edu.icesi.student360.lms.domain.model.Course;
+import co.edu.icesi.student360.lms.domain.model.CourseActivity;
 import co.edu.icesi.student360.lms.domain.model.CourseEnrollment;
 import co.edu.icesi.student360.lms.domain.model.EngagementSignals;
 import co.edu.icesi.student360.lms.domain.model.EnrollmentStatus;
+import co.edu.icesi.student360.lms.domain.model.Participation;
 import co.edu.icesi.student360.lms.domain.model.Submission;
 import co.edu.icesi.student360.lms.domain.model.SubmissionStatus;
 import java.math.BigDecimal;
@@ -38,20 +42,22 @@ class EngagementSignalServiceTest {
         List.of(enrollment(architecture), enrollment(calculus), enrollment(thinking));
     List<Submission> submissions =
         List.of(
-            submission(SubmissionStatus.ON_TIME),
-            submission(SubmissionStatus.LATE),
-            submission(SubmissionStatus.LATE),
-            submission(SubmissionStatus.MISSING),
-            submission(SubmissionStatus.MISSING));
+            submission(architecture, SubmissionStatus.ON_TIME),
+            submission(architecture, SubmissionStatus.LATE),
+            submission(architecture, SubmissionStatus.LATE),
+            submission(architecture, SubmissionStatus.MISSING),
+            submission(architecture, SubmissionStatus.MISSING));
     AccessLog last = access(architecture, NOW.minus(Duration.ofDays(21)));
 
     EngagementSignals signals =
         service.compute("S-1003", enrollments, submissions, List.of(last), Optional.of(last));
 
     assertThat(signals.daysSinceLastAccess()).isEqualTo(21);
+    assertThat(signals.lastAccessAt()).isEqualTo(last.getOccurredAt());
     assertThat(signals.onTimeSubmissionRate()).isEqualByComparingTo(new BigDecimal("0.20"));
     assertThat(signals.coursesWithoutActivity()).isEqualTo(2);
     assertThat(signals.activeCourses()).isEqualTo(3);
+    assertThat(signals.accessCount30d()).isEqualTo(1);
     assertThat(signals.lateSubmissions()).isEqualTo(2);
     assertThat(signals.missingSubmissions()).isEqualTo(2);
     assertThat(signals.computedAt()).isEqualTo(NOW);
@@ -69,13 +75,16 @@ class EngagementSignalServiceTest {
         service.compute(
             "S-1001",
             enrollments,
-            List.of(submission(SubmissionStatus.ON_TIME), submission(SubmissionStatus.ON_TIME)),
+            List.of(
+                submission(architecture, SubmissionStatus.ON_TIME),
+                submission(calculus, SubmissionStatus.ON_TIME)),
             recent,
             Optional.of(recent.get(0)));
 
     assertThat(signals.daysSinceLastAccess()).isEqualTo(1);
     assertThat(signals.onTimeSubmissionRate()).isEqualByComparingTo(BigDecimal.ONE);
     assertThat(signals.coursesWithoutActivity()).isZero();
+    assertThat(signals.accessCount30d()).isEqualTo(2);
   }
 
   @Test
@@ -85,8 +94,10 @@ class EngagementSignalServiceTest {
             "S-9000", List.of(enrollment(calculus)), List.of(), List.of(), Optional.empty());
 
     assertThat(signals.daysSinceLastAccess()).isNull();
+    assertThat(signals.lastAccessAt()).isNull();
     assertThat(signals.onTimeSubmissionRate()).isNull();
     assertThat(signals.coursesWithoutActivity()).isEqualTo(1);
+    assertThat(signals.accessCount30d()).isZero();
   }
 
   @Test
@@ -108,6 +119,51 @@ class EngagementSignalServiceTest {
     assertThat(signals.daysSinceLastAccess()).isEqualTo(40);
   }
 
+  @Test
+  void shouldBreakDownActivityPerCourseWithParticipationLabels() {
+    // Mirrors the pencil design's per-course table: a course touched three days ago with no
+    // trouble reads ACTIVE; one untouched for over two weeks with a pending backlog reads
+    // INACTIVE; one merely quiet for a week and a half reads LOW; one with a single late
+    // submission a few days in reads MODERATE.
+    List<CourseEnrollment> enrollments =
+        List.of(enrollment(architecture), enrollment(calculus), enrollment(thinking));
+    List<Submission> submissions =
+        List.of(
+            submission(architecture, SubmissionStatus.ON_TIME),
+            submission(calculus, SubmissionStatus.MISSING),
+            submission(calculus, SubmissionStatus.MISSING),
+            submission(thinking, SubmissionStatus.LATE));
+    List<AccessLog> accesses =
+        List.of(
+            access(architecture, NOW.minus(Duration.ofDays(3))),
+            access(calculus, NOW.minus(Duration.ofDays(20))),
+            access(thinking, NOW.minus(Duration.ofDays(12))));
+
+    ActivitySummary summary =
+        service.summarise(
+            "S-1003", 30, enrollments, submissions, accesses, Optional.of(accesses.get(0)));
+
+    assertThat(summary.courses())
+        .extracting(CourseActivity::courseCode, CourseActivity::participation)
+        .containsExactly(
+            tuple("HUM-110", Participation.MODERATE),
+            tuple("ISI-301", Participation.ACTIVE),
+            tuple("MAT-201", Participation.INACTIVE));
+  }
+
+  @Test
+  void shouldReadInactiveWhenACourseWasNeverOpened() {
+    List<CourseEnrollment> enrollments = List.of(enrollment(architecture));
+
+    ActivitySummary summary =
+        service.summarise("S-9000", 30, enrollments, List.of(), List.of(), Optional.empty());
+
+    assertThat(summary.courses()).hasSize(1);
+    assertThat(summary.courses().get(0).participation()).isEqualTo(Participation.INACTIVE);
+    assertThat(summary.courses().get(0).lastAccessAt()).isNull();
+    assertThat(summary.courses().get(0).daysSinceLastAccess()).isNull();
+  }
+
   private static Course course(int id, String code) {
     return instance(Course.class, Map.of("id", id, "code", code, "name", code, "term", "2026-2"));
   }
@@ -118,11 +174,19 @@ class EngagementSignalServiceTest {
         Map.of("studentReference", "S", "course", course, "status", EnrollmentStatus.ACTIVE));
   }
 
-  private static Submission submission(SubmissionStatus status) {
+  private static Submission submission(Course course, SubmissionStatus status) {
     Assignment assignment =
         instance(
             Assignment.class,
-            Map.of("title", "t", "type", "HOMEWORK", "dueAt", NOW.minus(Duration.ofDays(5))));
+            Map.of(
+                "course",
+                course,
+                "title",
+                "t",
+                "type",
+                "HOMEWORK",
+                "dueAt",
+                NOW.minus(Duration.ofDays(5))));
     return instance(
         Submission.class,
         Map.of("assignment", assignment, "studentReference", "S", "status", status));
