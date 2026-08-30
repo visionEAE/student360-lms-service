@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: lms-service
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:student360}
+    username: ${LMS_DB_USER:lms_user}
+    password: ${LMS_DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate            # Flyway owns the schema; Hibernate only checks it matches
+    properties:
+      hibernate:
+        default_schema: lms
+  flyway:
+    schemas: lms                   # this service migrates its own schema and nothing else
+    default-schema: lms
+    locations: classpath:db/migration
+
+server:
+  port: ${PORT:8083}                # PORT is the Cloud Run contract
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+student360:
+  service-name: lms-service        # also the audience every inbound service token must carry
+  security:
+    service-token:
+      secret: ${SERVICE_TOKEN_SECRET}
+      protected-paths: ["/api/**"]
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
