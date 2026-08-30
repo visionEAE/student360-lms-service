@@ -1,9 +1,14 @@
 package co.edu.icesi.student360.lms.api;
 
-import co.edu.icesi.student360.lms.api.dto.ActivityResponse;
-import co.edu.icesi.student360.lms.api.dto.CourseResponse;
-import co.edu.icesi.student360.lms.api.dto.EngagementSignalsResponse;
-import co.edu.icesi.student360.lms.domain.service.StudentEngagementService;
+import co.edu.icesi.student360.lms.application.query.FindActivityQuery;
+import co.edu.icesi.student360.lms.application.query.FindActivityQueryHandler;
+import co.edu.icesi.student360.lms.application.query.FindCoursesQuery;
+import co.edu.icesi.student360.lms.application.query.FindCoursesQueryHandler;
+import co.edu.icesi.student360.lms.application.query.FindSignalsQuery;
+import co.edu.icesi.student360.lms.application.query.FindSignalsQueryHandler;
+import co.edu.icesi.student360.lms.application.query.model.ActivityModel;
+import co.edu.icesi.student360.lms.application.query.model.CourseModel;
+import co.edu.icesi.student360.lms.application.query.model.EngagementSignalsModel;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.util.List;
@@ -14,30 +19,38 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/** HTTP ⇄ query translation only; the read models already have the contract's shape. */
 @RestController
 @Validated
 @RequestMapping("/api/lms/students")
 public class StudentEngagementController {
 
-  private final StudentEngagementService engagement;
+  private final FindCoursesQueryHandler findCourses;
+  private final FindActivityQueryHandler findActivity;
+  private final FindSignalsQueryHandler findSignals;
 
-  public StudentEngagementController(StudentEngagementService engagement) {
-    this.engagement = engagement;
+  public StudentEngagementController(
+      FindCoursesQueryHandler findCourses,
+      FindActivityQueryHandler findActivity,
+      FindSignalsQueryHandler findSignals) {
+    this.findCourses = findCourses;
+    this.findActivity = findActivity;
+    this.findSignals = findSignals;
   }
 
   @GetMapping("/{id}/courses")
-  public List<CourseResponse> courses(@PathVariable String id) {
-    return engagement.findCourses(id).stream().map(CourseResponse::from).toList();
+  public List<CourseModel> courses(@PathVariable String id) {
+    return findCourses.handle(new FindCoursesQuery(id));
   }
 
   @GetMapping("/{id}/activity")
-  public ActivityResponse activity(
+  public ActivityModel activity(
       @PathVariable String id, @RequestParam(defaultValue = "30") @Min(1) @Max(365) int days) {
-    return ActivityResponse.from(engagement.findActivity(id, days));
+    return findActivity.handle(new FindActivityQuery(id, days));
   }
 
   @GetMapping("/{id}/signals")
-  public EngagementSignalsResponse signals(@PathVariable String id) {
-    return EngagementSignalsResponse.from(engagement.findSignals(id));
+  public EngagementSignalsModel signals(@PathVariable String id) {
+    return findSignals.handle(new FindSignalsQuery(id));
   }
 }
