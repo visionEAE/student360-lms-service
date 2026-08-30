@@ -1,6 +1,7 @@
 package co.edu.icesi.student360.lms.domain.model;
 
 import java.time.Instant;
+import java.util.List;
 
 /** Raw activity counts inside a window of {@code windowDays} days ending now. */
 public record ActivitySummary(
@@ -10,4 +11,5 @@ public record ActivitySummary(
     Instant lastAccessAt,
     long onTime,
     long late,
-    long missing) {}
+    long missing,
+    List<CourseActivity> courses) {}

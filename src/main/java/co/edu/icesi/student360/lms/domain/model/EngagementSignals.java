@@ -11,8 +11,10 @@ public record EngagementSignals(
     String studentId,
     Instant computedAt,
     Integer daysSinceLastAccess,
+    Instant lastAccessAt,
     BigDecimal onTimeSubmissionRate,
     int coursesWithoutActivity,
     int activeCourses,
+    int accessCount30d,
     int lateSubmissions,
     int missingSubmissions) {}
